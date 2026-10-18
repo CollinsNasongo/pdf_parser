@@ -71,6 +71,7 @@ def split_pdf_to_folder(raw_pdf_path: Path) -> Path:
 FULLCODE = re.compile(r"(?<!\d)\d{15}(?!\d)")
 
 CSV_COLUMNS = [
+    "election_year",
     "county_code",
     "county_name",
     "const_code",
@@ -272,6 +273,14 @@ def parse_pdf(pdf_path: Path, layout: str = "2022") -> tuple[list[dict], list[st
 # --------------------------------------------------------------------------- #
 # Folder -> CSV
 # --------------------------------------------------------------------------- #
+def _election_year(pdf_folder: Path) -> str:
+    """Year from the source folder name, e.g. 'rov_per_polling_station_2017' -> '2017'."""
+    m = re.search(r"(?<!\d)(2017|2022)(?!\d)", pdf_folder.name)
+    if not m:
+        raise ValueError(f"cannot determine election year from folder name: {pdf_folder.name!r}")
+    return m.group(1)
+
+
 def _page_number(pdf_path: Path) -> int:
     """Sort key so page_2 comes before page_10 (numeric, not lexicographic)."""
     m = re.search(r"(\d+)", pdf_path.stem)
@@ -346,12 +355,15 @@ def transform_folder_to_csv(
     output_dir = Path(output_dir) / pdf_folder.name   # csv/<name>/
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    election_year = _election_year(pdf_folder)
+
     if log_file is None:
         log_file = output_dir / "parse.log"
     logger = _setup_logger(Path(log_file))
 
     pdf_files = sorted(pdf_folder.glob("*.pdf"), key=_page_number)
-    logger.info("found %d PDF(s) in %s (layout=%s)", len(pdf_files), pdf_folder, layout)
+    logger.info("found %d PDF(s) in %s (layout=%s, election_year=%s)",
+                len(pdf_files), pdf_folder, layout, election_year)
     if not pdf_files:
         logger.warning("nothing to do. Are the page_*.pdf files directly inside "
                        "this folder (not in a sub-folder)?")
@@ -362,6 +374,8 @@ def transform_folder_to_csv(
     voters_total = 0
     for pdf_path in pdf_files:
         rows, errors = parse_pdf(pdf_path, layout)
+        for row in rows:
+            row["election_year"] = election_year
         output_csv = output_dir / f"{pdf_path.stem}.csv"   # page_1.pdf -> page_1.csv
         _write_csv(rows, output_csv)
         grand_total += len(rows)
